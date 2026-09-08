@@ -31,17 +31,13 @@ EMAIL_RECEIVER = os.environ.get("EMAIL_RECEIVER", "recipient@email.com")
 
 def fetch_cot_gold():
     """
-    Fetch the latest Gold COT data from CFTC's public Socrata API.
+    Fetch the latest Gold COT data from CFTC's official Socrata API.
     No API key required.
     """
-    # Correct resource ID for Legacy Combined (futures + options)
     url = "https://publicreporting.cftc.gov/resource/6dca-aqww.json"
     
-    # Using the exact market name filter that works
-    where_clause = "market_and_exchange_names='GOLD - COMMODITY EXCHANGE INC.'"
-    
     params = {
-        "$where": where_clause,
+        "$where": "market_and_exchange_names='GOLD - COMMODITY EXCHANGE INC.'",
         "$order": "report_date_as_yyyy_mm_dd DESC",
         "$limit": "5"
     }
