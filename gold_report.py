@@ -34,15 +34,14 @@ def fetch_cot_gold():
     Fetch the latest Gold COT data from CFTC's public Socrata API.
     No API key required.
     """
-    # Disaggregated Combined report for Gold
-    # Socrata endpoint: https://publicreporting.cftc.gov/resource/6cae-aax4.csv
-    # Using the SoQL query format
-    url = "https://publicreporting.cftc.gov/resource/6cae-aax4.json"
+    # Correct resource ID for Disaggregated Combined (futures + options)
+    # Verified against publicreporting.cftc.gov
+    url = "https://publicreporting.cftc.gov/resource/6dca-aqww.json"
     
     params = {
         "$where": "commodity_name = 'GOLD'",
         "$order": "report_date DESC",
-        "$limit": "5"  # Get last 5 weeks
+        "$limit": "5"
     }
     
     try:
