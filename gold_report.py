@@ -16,8 +16,6 @@ from datetime import datetime
 # ============================================================
 # CONFIGURATION - Read from environment (GitHub Secrets)
 # ============================================================
-
-FRED_API_KEY = os.environ.get("FRED_API_KEY", "")
 GEMINI_API_KEY = os.environ.get("GEMINI_API_KEY", "")
 QUANTGIST_API_KEY = os.environ.get("QUANTGIST_API_KEY", "")
 EMAIL_SENDER = os.environ.get("EMAIL_SENDER", "")
@@ -28,22 +26,49 @@ EMAIL_RECEIVER = os.environ.get("EMAIL_RECEIVER", "")
 # 1. FETCH COT DATA (CFTC Socrata API - No key required)
 # ============================================================
 
-def fetch_cot_gold():
-    url = "https://publicreporting.cftc.gov/resource/6dca-aqww.json"
-    params = {
-        "$where": "market_and_exchange_names='GOLD - COMMODITY EXCHANGE INC.'",
-        "$order": "report_date_as_yyyy_mm_dd DESC",
-        "$limit": "5"
-    }
-    try:
-        response = requests.get(url, params=params, timeout=30)
-        response.raise_for_status()
-        data = response.json()
-        print(f"  ✓ Retrieved {len(data)} records")
-        return data
-    except Exception as e:
-        print(f"Error fetching COT data: {e}")
-        return None
+def fetch_treasury_yields():
+    """
+    Fetch 10-year and 2-year Treasury yields from the U.S. Treasury Fiscal Data API.
+    No API key required. Falls back to yesterday if today has no data.
+    """
+    base = "https://api.fiscaldata.treasury.gov/services/api/fiscal_service/v2/accounting/od/avg_interest_rates"
+    
+    # Try today, then yesterday, then the day before
+    for days_back in range(0, 5):
+        date_str = (datetime.now() - timedelta(days=days_back)).strftime("%Y-%m-%d")
+        
+        params = {
+            "filter": f"record_date:eq:{date_str}",
+            "sort": "-record_date"
+        }
+        
+        try:
+            r = requests.get(base, params=params, timeout=30)
+            r.raise_for_status()
+            data = r.json()
+            
+            if data.get("data"):
+                yields = {"dgs10": None, "dgs2": None}
+                for item in data["data"]:
+                    security_type = item.get("security_type", "")
+                    rate = item.get("avg_interest_rate")
+                    if rate is None:
+                        continue
+                    if "10-Year" in security_type:
+                        yields["dgs10"] = float(rate)
+                    elif "2-Year" in security_type:
+                        yields["dgs2"] = float(rate)
+                
+                if yields["dgs10"] and yields["dgs2"]:
+                    yields["spread"] = yields["dgs10"] - yields["dgs2"]
+                    print(f"  ✓ 10-Year: {yields['dgs10']}% (as of {date_str})")
+                    print(f"  ✓ 2-Year: {yields['dgs2']}% (as of {date_str})")
+                    return yields
+        except Exception as e:
+            print(f"  ⚠️ No data for {date_str}")
+    
+    print("  ⚠️ Could not fetch Treasury yields")
+    return {"dgs10": None, "dgs2": None, "spread": None}
 
 def parse_cot_data(raw_data):
     if not raw_data or len(raw_data) == 0:
