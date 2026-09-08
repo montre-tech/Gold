@@ -1,8 +1,8 @@
-#!/usr/env python3
+#!/usr/bin/env python3
 """
 Daily Gold COT + Macro Analysis Report
-Uses CFTC Socrata API (no key required) + FRED + Gemini + QuantGist
-All API keys are read from environment variables (GitHub Secrets).
+Uses CFTC Socrata API + U.S. Treasury API (no keys required)
+Optional: QuantGist + Gemini (requires keys)
 """
 
 import requests
@@ -11,11 +11,12 @@ import smtplib
 import os
 from email.mime.text import MIMEText
 from email.mime.multipart import MIMEMultipart
-from datetime import datetime
+from datetime import datetime, timedelta
 
 # ============================================================
 # CONFIGURATION - Read from environment (GitHub Secrets)
 # ============================================================
+
 GEMINI_API_KEY = os.environ.get("GEMINI_API_KEY", "")
 QUANTGIST_API_KEY = os.environ.get("QUANTGIST_API_KEY", "")
 EMAIL_SENDER = os.environ.get("EMAIL_SENDER", "")
@@ -26,51 +27,29 @@ EMAIL_RECEIVER = os.environ.get("EMAIL_RECEIVER", "")
 # 1. FETCH COT DATA (CFTC Socrata API - No key required)
 # ============================================================
 
-def fetch_treasury_yields():
+def fetch_cot_gold():
     """
-    Fetch 10-year and 2-year Treasury yields from the U.S. Treasury Fiscal Data API.
-    No API key required. Falls back to yesterday if today has no data.
+    Fetch the latest Gold COT data from CFTC's official Socrata API.
+    No API key required.
     """
-    base = "https://api.fiscaldata.treasury.gov/services/api/fiscal_service/v2/accounting/od/avg_interest_rates"
-    
-    # Try today, then yesterday, then the day before
-    for days_back in range(0, 5):
-        date_str = (datetime.now() - timedelta(days=days_back)).strftime("%Y-%m-%d")
-        
-        params = {
-            "filter": f"record_date:eq:{date_str}",
-            "sort": "-record_date"
-        }
-        
-        try:
-            r = requests.get(base, params=params, timeout=30)
-            r.raise_for_status()
-            data = r.json()
-            
-            if data.get("data"):
-                yields = {"dgs10": None, "dgs2": None}
-                for item in data["data"]:
-                    security_type = item.get("security_type", "")
-                    rate = item.get("avg_interest_rate")
-                    if rate is None:
-                        continue
-                    if "10-Year" in security_type:
-                        yields["dgs10"] = float(rate)
-                    elif "2-Year" in security_type:
-                        yields["dgs2"] = float(rate)
-                
-                if yields["dgs10"] and yields["dgs2"]:
-                    yields["spread"] = yields["dgs10"] - yields["dgs2"]
-                    print(f"  ✓ 10-Year: {yields['dgs10']}% (as of {date_str})")
-                    print(f"  ✓ 2-Year: {yields['dgs2']}% (as of {date_str})")
-                    return yields
-        except Exception as e:
-            print(f"  ⚠️ No data for {date_str}")
-    
-    print("  ⚠️ Could not fetch Treasury yields")
-    return {"dgs10": None, "dgs2": None, "spread": None}
+    url = "https://publicreporting.cftc.gov/resource/6dca-aqww.json"
+    params = {
+        "$where": "market_and_exchange_names='GOLD - COMMODITY EXCHANGE INC.'",
+        "$order": "report_date_as_yyyy_mm_dd DESC",
+        "$limit": "5"
+    }
+    try:
+        response = requests.get(url, params=params, timeout=30)
+        response.raise_for_status()
+        data = response.json()
+        print(f"  ✓ Retrieved {len(data)} records")
+        return data
+    except Exception as e:
+        print(f"Error fetching COT data: {e}")
+        return None
 
 def parse_cot_data(raw_data):
+    """Extract key metrics. Handles missing fields gracefully."""
     if not raw_data or len(raw_data) == 0:
         return None
     latest = raw_data[0]
@@ -102,39 +81,55 @@ def parse_cot_data(raw_data):
     return result
 
 # ============================================================
-# 2. FETCH TREASURY YIELDS (FRED API - Free key)
+# 2. FETCH TREASURY YIELDS (U.S. Treasury API - No key required)
 # ============================================================
 
 def fetch_treasury_yields():
-    if not FRED_API_KEY:
-        print("  ⚠️ FRED API key not set. Skipping yields.")
-        return None
-    base = "https://api.stlouisfed.org/fred/series/observations"
-    yields = {}
-    for series_id in ["DGS10", "DGS2"]:
+    """
+    Fetch 10-year and 2-year Treasury yields from the U.S. Treasury Fiscal Data API.
+    No API key required. Falls back to previous day if today has no data.
+    """
+    base = "https://api.fiscaldata.treasury.gov/services/api/fiscal_service/v2/accounting/od/avg_interest_rates"
+    
+    # Try today, then yesterday, up to 5 days back
+    for days_back in range(0, 5):
+        date_str = (datetime.now() - timedelta(days=days_back)).strftime("%Y-%m-%d")
+        
         params = {
-            "series_id": series_id,
-            "api_key": FRED_API_KEY,
-            "file_type": "json",
-            "sort_order": "desc",
-            "limit": 1
+            "filter": f"record_date:eq:{date_str}",
+            "sort": "-record_date"
         }
+        
         try:
             r = requests.get(base, params=params, timeout=30)
             r.raise_for_status()
             data = r.json()
-            if data.get("observations") and len(data["observations"]) > 0:
-                val = data["observations"][0].get("value")
-                yields[series_id.lower()] = float(val) if val and val != "." else None
+            
+            if data.get("data"):
+                yields = {"dgs10": None, "dgs2": None}
+                for item in data["data"]:
+                    security_type = item.get("security_type", "")
+                    rate = item.get("avg_interest_rate")
+                    if rate is None:
+                        continue
+                    if "10-Year" in security_type:
+                        yields["dgs10"] = float(rate)
+                    elif "2-Year" in security_type:
+                        yields["dgs2"] = float(rate)
+                
+                if yields["dgs10"] is not None and yields["dgs2"] is not None:
+                    yields["spread"] = yields["dgs10"] - yields["dgs2"]
+                    print(f"  ✓ 10-Year: {yields['dgs10']}% (as of {date_str})")
+                    print(f"  ✓ 2-Year: {yields['dgs2']}% (as of {date_str})")
+                    return yields
         except Exception as e:
-            print(f"  ⚠️ Error fetching {series_id}: {e}")
-            yields[series_id.lower()] = None
-    if yields.get("dgs10") and yields.get("dgs2"):
-        yields["spread"] = yields["dgs10"] - yields["dgs2"]
-    return yields
+            print(f"  ⚠️ No data for {date_str}: {e}")
+    
+    print("  ⚠️ Could not fetch Treasury yields after 5 attempts")
+    return {"dgs10": None, "dgs2": None, "spread": None}
 
 # ============================================================
-# 3. FETCH ECONOMIC CALENDAR (QuantGist API - Free key)
+# 3. FETCH ECONOMIC CALENDAR (QuantGist API - Optional)
 # ============================================================
 
 def fetch_economic_calendar():
@@ -153,7 +148,7 @@ def fetch_economic_calendar():
         return None
 
 # ============================================================
-# 4. GENERATE ANALYSIS (Gemini API - Free tier)
+# 4. GENERATE ANALYSIS (Gemini API - Optional)
 # ============================================================
 
 def generate_analysis(cot_data, yields, calendar):
@@ -204,7 +199,7 @@ Provide a concise professional analysis:
 def fallback_analysis(cot_data, yields):
     net = cot_data['non_comm_net']
     bias = "Bullish" if net > 150000 else "Neutral" if net > 50000 else "Bearish"
-    yield_str = f"{yields.get('dgs10', 'N/A')}%" if yields else "N/A"
+    yield_str = f"{yields.get('dgs10', 'N/A')}%" if yields and yields.get('dgs10') else "N/A"
     return f"""
 GOLD POSITIONING (Fallback Analysis)
 
