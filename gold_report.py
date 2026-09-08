@@ -33,13 +33,12 @@ def fetch_cot_gold():
     """
     Fetch the latest Gold COT data from CFTC's public Socrata API.
     No API key required.
-    Based on verified working JavaScript code.
     """
     # Correct resource ID for Legacy Combined (futures + options)
-    # Using the exact market name filter that works with this dataset
-    where_clause = "market_and_exchange_names='GOLD - COMMODITY EXCHANGE INC.'"
-    
     url = "https://publicreporting.cftc.gov/resource/6dca-aqww.json"
+    
+    # Using the exact market name filter that works
+    where_clause = "market_and_exchange_names='GOLD - COMMODITY EXCHANGE INC.'"
     
     params = {
         "$where": where_clause,
@@ -51,10 +50,7 @@ def fetch_cot_gold():
         response = requests.get(url, params=params, timeout=30)
         response.raise_for_status()
         data = response.json()
-        
-        # Debug: print how many records were returned
         print(f"  ✓ Retrieved {len(data)} records")
-        
         return data
     except Exception as e:
         print(f"Error fetching COT data: {e}")
