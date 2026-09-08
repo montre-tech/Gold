@@ -28,6 +28,7 @@ jobs:
       
       - name: Run gold report script
         env:
+          FRED_API_KEY: ${{ secrets.FRED_API_KEY }}
           GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
           QUANTGIST_API_KEY: ${{ secrets.QUANTGIST_API_KEY }}
           EMAIL_SENDER: ${{ secrets.EMAIL_SENDER }}
