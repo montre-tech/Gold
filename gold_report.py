@@ -1,8 +1,7 @@
 #!/usr/bin/env python3
 """
 Daily Gold COT + Macro Analysis Report
-Uses CFTC Socrata API + U.S. Treasury API (no keys required)
-Optional: QuantGist + Gemini (requires keys)
+Uses CFTC Socrata API + FRED API + (optional) QuantGist + Gemini
 """
 
 import requests
@@ -17,6 +16,7 @@ from datetime import datetime, timedelta
 # CONFIGURATION - Read from environment (GitHub Secrets)
 # ============================================================
 
+FRED_API_KEY = os.environ.get("FRED_API_KEY", "")
 GEMINI_API_KEY = os.environ.get("GEMINI_API_KEY", "")
 QUANTGIST_API_KEY = os.environ.get("QUANTGIST_API_KEY", "")
 EMAIL_SENDER = os.environ.get("EMAIL_SENDER", "")
@@ -81,52 +81,61 @@ def parse_cot_data(raw_data):
     return result
 
 # ============================================================
-# 2. FETCH TREASURY YIELDS (U.S. Treasury API - No key required)
+# 2. FETCH TREASURY YIELDS (FRED API - Requires API key via secret)
 # ============================================================
 
 def fetch_treasury_yields():
     """
-    Fetch 10-year and 2-year Treasury yields from the U.S. Treasury Fiscal Data API.
-    No API key required. Falls back to previous day if today has no data.
+    Fetch 10-year and 2-year Treasury yields from FRED.
+    Uses the FRED_API_KEY from environment (GitHub Secret).
     """
-    base = "https://api.fiscaldata.treasury.gov/services/api/fiscal_service/v2/accounting/od/avg_interest_rates"
-    
-    # Try today, then yesterday, up to 5 days back
-    for days_back in range(0, 5):
-        date_str = (datetime.now() - timedelta(days=days_back)).strftime("%Y-%m-%d")
-        
+    if not FRED_API_KEY:
+        print("  ⚠️ FRED_API_KEY not set. Skipping Treasury yields.")
+        return {"dgs10": None, "dgs2": None, "spread": None}
+
+    base = "https://api.stlouisfed.org/fred/series/observations"
+    yields = {}
+
+    # Map of series IDs we want
+    series_map = {
+        "dgs10": "DGS10",
+        "dgs2": "DGS2"
+    }
+
+    for key, series_id in series_map.items():
         params = {
-            "filter": f"record_date:eq:{date_str}",
-            "sort": "-record_date"
+            "series_id": series_id,
+            "api_key": FRED_API_KEY,
+            "file_type": "json",
+            "sort_order": "desc",
+            "limit": 1  # Get the most recent observation
         }
-        
+
         try:
             r = requests.get(base, params=params, timeout=30)
             r.raise_for_status()
             data = r.json()
-            
-            if data.get("data"):
-                yields = {"dgs10": None, "dgs2": None}
-                for item in data["data"]:
-                    security_type = item.get("security_type", "")
-                    rate = item.get("avg_interest_rate")
-                    if rate is None:
-                        continue
-                    if "10-Year" in security_type:
-                        yields["dgs10"] = float(rate)
-                    elif "2-Year" in security_type:
-                        yields["dgs2"] = float(rate)
-                
-                if yields["dgs10"] is not None and yields["dgs2"] is not None:
-                    yields["spread"] = yields["dgs10"] - yields["dgs2"]
-                    print(f"  ✓ 10-Year: {yields['dgs10']}% (as of {date_str})")
-                    print(f"  ✓ 2-Year: {yields['dgs2']}% (as of {date_str})")
-                    return yields
+
+            if data.get("observations") and len(data["observations"]) > 0:
+                val = data["observations"][0].get("value")
+                if val and val != ".":
+                    yields[key] = float(val)
+                    print(f"  ✓ {series_id}: {yields[key]}%")
+                else:
+                    print(f"  ⚠️ No valid value for {series_id}")
+                    yields[key] = None
+            else:
+                print(f"  ⚠️ No observations for {series_id}")
+                yields[key] = None
+
         except Exception as e:
-            print(f"  ⚠️ No data for {date_str}: {e}")
-    
-    print("  ⚠️ Could not fetch Treasury yields after 5 attempts")
-    return {"dgs10": None, "dgs2": None, "spread": None}
+            print(f"  ⚠️ Error fetching {series_id}: {e}")
+            yields[key] = None
+
+    if yields.get("dgs10") and yields.get("dgs2"):
+        yields["spread"] = yields["dgs10"] - yields["dgs2"]
+
+    return yields
 
 # ============================================================
 # 3. FETCH ECONOMIC CALENDAR (QuantGist API - Optional)
