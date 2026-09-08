@@ -33,14 +33,17 @@ def fetch_cot_gold():
     """
     Fetch the latest Gold COT data from CFTC's public Socrata API.
     No API key required.
+    Based on verified working JavaScript code.
     """
-    # Correct resource ID for Disaggregated Combined (futures + options)
-    # Verified against publicreporting.cftc.gov
+    # Correct resource ID for Legacy Combined (futures + options)
+    # Using the exact market name filter that works with this dataset
+    where_clause = "market_and_exchange_names='GOLD - COMMODITY EXCHANGE INC.'"
+    
     url = "https://publicreporting.cftc.gov/resource/6dca-aqww.json"
     
     params = {
-        "$where": "commodity_name = 'GOLD'",
-        "$order": "report_date DESC",
+        "$where": where_clause,
+        "$order": "report_date_as_yyyy_mm_dd DESC",
         "$limit": "5"
     }
     
@@ -48,6 +51,10 @@ def fetch_cot_gold():
         response = requests.get(url, params=params, timeout=30)
         response.raise_for_status()
         data = response.json()
+        
+        # Debug: print how many records were returned
+        print(f"  ✓ Retrieved {len(data)} records")
+        
         return data
     except Exception as e:
         print(f"Error fetching COT data: {e}")
@@ -68,7 +75,7 @@ def parse_cot_data(raw_data):
             return 0.0
     
     result = {
-        "report_date": latest.get("report_date", "N/A"),
+        "report_date": latest.get("report_date_as_yyyy_mm_dd", "N/A"),
         "open_interest": to_float(latest.get("open_interest_all")),
         "non_comm_long": to_float(latest.get("noncomm_positions_long_all")),
         "non_comm_short": to_float(latest.get("noncomm_positions_short_all")),
@@ -300,6 +307,9 @@ def main():
         print("ERROR: Failed to fetch COT data.")
         return
     cot_data = parse_cot_data(raw_cot)
+    if not cot_data:
+        print("ERROR: Failed to parse COT data.")
+        return
     print(f"  ✓ Report date: {cot_data['report_date']}")
     print(f"  ✓ Non-Comm Net: {cot_data['non_comm_net']:,.0f}")
     
