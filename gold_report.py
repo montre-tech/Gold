@@ -17,7 +17,7 @@ from datetime import datetime
 # CONFIGURATION - Read from environment (GitHub Secrets)
 # ============================================================
 
-FRED_API_KEY = os.environ.get("FRED_API_KEY", "")
+FRED_API_KEY = os.environ.get("FRED_API_KEY", "ff645e865cb56a4be96b680ae9ebd558")
 GEMINI_API_KEY = os.environ.get("GEMINI_API_KEY", "")
 QUANTGIST_API_KEY = os.environ.get("QUANTGIST_API_KEY", "")
 EMAIL_SENDER = os.environ.get("EMAIL_SENDER", "")
