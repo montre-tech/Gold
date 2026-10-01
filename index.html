@@ -40,6 +40,7 @@ canvas{display:block}
  <label>Min vol<input id="mv" type="number" value="0.5" step="any" min="0"></label>
  <label>Stack ≥<input id="sc" type="number" value="3" min="2"></label>
  <button id="go">Load</button>
+ <label>Zoom<span style="display:flex;gap:4px;align-items:center"><button id="zo" style="background:#334155;padding:6px 10px">−</button><span id="zl" style="min-width:38px;text-align:center">100%</span><button id="zi" style="background:#334155;padding:6px 10px">+</button><button id="zr" style="background:#334155;padding:6px 10px">Fit</button></span></label>
  <span id="st">idle</span>
 </div>
 <div style="padding:4px 8px;font-size:11px;color:#6b7686">Bias tags: D=delta · A=absorption · E=exhaustion · S=stacked imbalance · P=close vs POC (+ bullish, − bearish, 0 neutral) · "~" = bar still forming · educational only, not financial advice</div>
@@ -166,8 +167,8 @@ function drawFP(cv,bars){
   for(const k of keys)for(const r of bars.get(k).lv.keys()){lo=Math.min(lo,r);hi=Math.max(hi,r)}
   const rows=hi-lo+1,W=PAD+keys.length*BW+20,H=rows*CH+FOOT+40;
   const dpr=devicePixelRatio||1;
-  cv.width=W*dpr;cv.height=H*dpr;cv.style.width=W+"px";cv.style.height=H+"px";
-  const c=cv.getContext("2d");c.scale(dpr,dpr);c.fillStyle="#10141a";c.fillRect(0,0,W,H);
+  cv.width=W*dpr*Z;cv.height=H*dpr*Z;cv.style.width=W*Z+"px";cv.style.height=H*Z+"px";
+  const c=cv.getContext("2d");c.scale(dpr*Z,dpr*Z);c.fillStyle="#10141a";c.fillRect(0,0,W,H);
   c.font="11px ui-monospace,Menlo,Consolas,monospace";c.textBaseline="middle";
   const y=r=>20+(hi-r)*CH;
   c.textAlign="right";c.fillStyle="#6b7686";
@@ -253,6 +254,14 @@ $("sy").onchange=()=>{
   const v=$("sy").value;$("cl").style.display=v==="custom"?"":"none";
   if(v!=="custom"){const[,m,r]=v.split("|");$("mk").value=m;$("rs").value=r;load()}
 };
+let Z=1;
+function zoom(f){Z=Math.max(.3,Math.min(2,Z*f));$("zl").textContent=Math.round(Z*100)+"%";draw()}
+$("zi").onclick=()=>zoom(1.25);
+$("zo").onclick=()=>zoom(.8);
+// Fit: scale so the widest panel fits the window width
+$("zr").onclick=()=>{Z=1;draw();const c=document.querySelector("#wrap canvas");
+  if(c){Z=Math.max(.3,Math.min(2,($("wrap").clientWidth-4)/(c.width/(devicePixelRatio||1))))}zoom(1)};
+$("wrap").addEventListener("wheel",e=>{if(e.ctrlKey){e.preventDefault();zoom(e.deltaY<0?1.1:1/1.1)}},{passive:false});
 $("go").onclick=load;
 ["o0","ob","og"].forEach(i=>$(i).onchange=load);
 (function loop(){if(dirty)draw();setTimeout(loop,250)})();
