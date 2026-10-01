@@ -44,7 +44,7 @@ canvas{display:block}
 <script>
 const $=id=>document.getElementById(id);
 let bars=new Map(),ws=null,lastId=0,gen=0,P={},dirty=false;
-const BW=120,CH=16,PAD=60,FOOT=100;
+const BW=135,CH=16,PAD=60,FOOT=135;
 
 function mix(a,b,t){t=Math.max(0,Math.min(1,t));return`rgb(${a.map((v,i)=>Math.round(v+(b[i]-v)*t)).join(",")})`}
 const NEU=[38,44,54],BUY=[22,163,74],SEL=[220,38,38];
@@ -159,7 +159,17 @@ function draw(){
     const lab=a.s>=3?"▲ BULLISH":a.s>=1?"↗ Lean up":a.s<=-3?"▼ BEARISH":a.s<=-1?"↘ Lean down":"↔ Neutral";
     c.fillStyle=a.s>0?"#4ade80":a.s<0?"#f87171":"#9ca3af";
     c.font="bold 11"+mono;c.fillText(lab+(live?" ~":""),x+w/2,fy+36);
-    c.font="10"+mono;c.fillText((a.s>0?"+":"")+a.s+"/5 "+a.tags,x+w/2,fy+51);
+    c.font="10"+mono;c.fillText("Score "+(a.s>0?"+":"")+a.s+"/5",x+w/2,fy+51);
+    const T=[["More selling","Delta balanced","More buying"],
+             ["Buys absorbed","No absorption","Sells absorbed"],
+             ["Buyers exhausted","No exhaustion","Sellers exhausted"],
+             ["Stacked sell imb","No stacked imb","Stacked buy imb"],
+             ["Closed below POC","Closed at POC","Closed above POC"]],L="DAESP";
+    c.font="9"+mono;
+    a.v.forEach((v,j)=>{
+      c.fillStyle=v>0?"#4ade80":v<0?"#f87171":"#6b7686";
+      c.fillText(L[j]+(v>0?"+":v<0?"-":"0")+" "+T[j][v+1],x+w/2,fy+66+j*12);
+    });
   });
   c.textAlign="right";c.fillStyle="#6b7686";
   c.fillText("Delta",PAD-6,20+rows*CH+14);c.fillText("Vol",PAD-6,20+rows*CH+30);c.fillText("Bias",PAD-6,20+rows*CH+50);
@@ -180,7 +190,7 @@ function analyze(b,tb,ta,sB,sS,poc){
   const S=sB&&!sS?1:sS&&!sB?-1:0;
   const pm=(poc+.5)*P.rs,Pp=b.c>pm?1:b.c<pm?-1:0;
   const t=v=>v>0?"+":v<0?"-":"0";
-  return{s:D+A+E+S+Pp,tags:"D"+t(D)+"A"+t(A)+"E"+t(E)+"S"+t(S)+"P"+t(Pp)};
+  return{s:D+A+E+S+Pp,v:[D,A,E,S,Pp],tags:"D"+t(D)+"A"+t(A)+"E"+t(E)+"S"+t(S)+"P"+t(Pp)};
 }
 function fmt(v){return v>=100?v.toFixed(0):v>=10?v.toFixed(1):v.toFixed(2)}
 
