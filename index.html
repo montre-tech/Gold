@@ -19,8 +19,17 @@ canvas{display:block}
 </head>
 <body>
 <div id="bar">
- <label>Market<select id="mk"><option value="spot">Spot</option><option value="fut">Futures</option></select></label>
- <label>Symbol<input id="sy" value="BTCUSDT"></label>
+ <label>Market<select id="mk"><option value="fut">Futures</option><option value="spot">Spot</option></select></label>
+ <label>Symbol<select id="sy" style="width:170px">
+  <option value="XAUUSDT|fut|0.5">Gold (XAUUSDT perp)</option>
+  <option value="PAXGUSDT|spot|0.5">Gold token (PAXGUSDT spot)</option>
+  <option value="XAGUSDT|fut|0.05">Silver (XAGUSDT perp)</option>
+  <option value="BTCUSDT|spot|10">Bitcoin (BTCUSDT)</option>
+  <option value="ETHUSDT|spot|0.5">Ethereum (ETHUSDT)</option>
+  <option value="SOLUSDT|spot|0.05">Solana (SOLUSDT)</option>
+  <option value="custom">Custom…</option>
+ </select></label>
+ <label id="cl" style="display:none">Custom<input id="cs" value="BTCUSDT"></label>
  <label>Timeframe<select id="tf"><option value="60">1m</option><option value="300" selected>5m</option><option value="900">15m</option><option value="3600">1h</option></select></label>
  <label>Row size ($)<input id="rs" type="number" value="10" step="any" min="0"></label>
  <label>Bars<input id="nb" type="number" value="8" min="2" max="40"></label>
@@ -50,7 +59,8 @@ function addTrade(T,p,q,m){
 
 async function load(){
   const g=++gen;if(ws){ws.onclose=null;ws.close()}
-  P={mk:$("mk").value,sy:$("sy").value.trim().toUpperCase(),tf:+$("tf").value,rs:+$("rs").value||1,
+  const sv=$("sy").value;
+  P={mk:$("mk").value,sy:sv==="custom"?$("cs").value.trim().toUpperCase():sv.split("|")[0],tf:+$("tf").value,rs:+$("rs").value||1,
      nb:+$("nb").value,ir:+$("ir").value,mv:+$("mv").value,sc:+$("sc").value};
   bars=new Map();lastId=0;
   const rest=P.mk==="spot"?"https://api.binance.com/api/v3/aggTrades":"https://fapi.binance.com/fapi/v1/aggTrades";
@@ -67,12 +77,29 @@ async function load(){
     }
   }catch(e){$("st").textContent="error: "+e.message+" (Binance may be blocked in your region)";return}
   if(g!==gen)return;
-  const host=P.mk==="spot"?"wss://stream.binance.com:9443/ws/":"wss://fstream.binance.com/ws/";
+  // Futures: Binance retired the legacy /ws URL on 2026-04-23; aggTrade now lives on /market
+  const url=(P.mk==="spot"?"wss://stream.binance.com:9443/stream?streams=":"wss://fstream.binance.com/market/stream?streams=")
+            +P.sy.toLowerCase()+"@aggTrade";
+  const catchUp=async()=>{
+    for(let i=0;i<10&&g===gen;i++){
+      const r=await fetch(`${rest}?symbol=${P.sy}&limit=1000&fromId=${lastId+1}`);
+      if(!r.ok)return;const d=await r.json();if(!d.length)return;
+      for(const x of d){addTrade(x.T,+x.p,+x.q,x.m);lastId=x.a}
+      if(d.length<1000)return;
+    }
+  };
   const open=()=>{
-    ws=new WebSocket(host+P.sy.toLowerCase()+"@aggTrade");
-    ws.onopen=()=>$("st").textContent=`live: ${P.sy} ${P.mk}`;
-    ws.onmessage=e=>{const d=JSON.parse(e.data);if(d.a>lastId){lastId=d.a;addTrade(d.T,+d.p,+d.q,d.m)}};
-    ws.onclose=()=>{if(g===gen){$("st").textContent="reconnecting…";setTimeout(open,2000)}};
+    let last=Date.now();
+    ws=new WebSocket(url);
+    const wd=setInterval(()=>{if(g!==gen)clearInterval(wd);else if(Date.now()-last>45000)ws.close()},10000);
+    ws.onopen=()=>{$("st").textContent=`live: ${P.sy} ${P.mk}`;catchUp().catch(()=>{})};
+    ws.onmessage=e=>{
+      last=Date.now();
+      const m=JSON.parse(e.data),d=m.data||m;
+      if(d.a>lastId){lastId=d.a;addTrade(d.T,+d.p,+d.q,d.m)}
+    };
+    ws.onerror=()=>{$("st").textContent="websocket error…"};
+    ws.onclose=()=>{clearInterval(wd);if(g===gen){$("st").textContent="reconnecting…";setTimeout(open,2000)}};
   };open();draw();
 }
 
@@ -131,9 +158,13 @@ function draw(){
 }
 function fmt(v){return v>=100?v.toFixed(0):v>=10?v.toFixed(1):v.toFixed(2)}
 
+$("sy").onchange=()=>{
+  const v=$("sy").value;$("cl").style.display=v==="custom"?"":"none";
+  if(v!=="custom"){const[,m,r]=v.split("|");$("mk").value=m;$("rs").value=r;load()}
+};
 $("go").onclick=load;
 (function loop(){if(dirty)draw();setTimeout(loop,250)})();
-load();
+$("sy").onchange();
 </script>
 </body>
 </html>
