@@ -162,9 +162,13 @@ function draw(){
 }
 
 function drawFP(cv,bars){
-  const keys=[...bars.keys()].sort((a,b)=>a-b).slice(-P.nb);if(!keys.length)return;
+  if(!P.tf)return;
+  // Same window for every panel: the last nb bars ending at the current bar
+  const nowK=Math.floor(Date.now()/1000/P.tf)*P.tf,
+        keys=Array.from({length:P.nb},(_,i)=>nowK-(P.nb-1-i)*P.tf);
   let lo=1e18,hi=-1e18;
-  for(const k of keys)for(const r of bars.get(k).lv.keys()){lo=Math.min(lo,r);hi=Math.max(hi,r)}
+  for(const k of keys){const bb=bars.get(k);if(bb)for(const r of bb.lv.keys()){lo=Math.min(lo,r);hi=Math.max(hi,r)}}
+  if(lo>hi)return;
   const rows=hi-lo+1,W=PAD+keys.length*BW+20,H=rows*CH+FOOT+40;
   const dpr=devicePixelRatio||1;
   cv.width=W*dpr*Z;cv.height=H*dpr*Z;cv.style.width=W*Z+"px";cv.style.height=H*Z+"px";
@@ -175,6 +179,7 @@ function drawFP(cv,bars){
   for(let r=lo;r<=hi;r+=Math.max(1,Math.ceil(2/ (CH/16))))c.fillText((r*P.rs).toFixed(2),PAD-6,y(r)+CH/2);
   keys.forEach((k,i)=>{
     const b=bars.get(k),x=PAD+i*BW,w=BW-6;
+    if(!b){c.textAlign="center";c.fillStyle="#4b5563";c.fillText(new Date(k*1000).toTimeString().slice(0,5),x+w/2,10);return}
     const bid=r=>(b.lv.get(r)||[0,0])[0],ask=r=>(b.lv.get(r)||[0,0])[1];
     let tb=0,ta=0,poc=null,pv=0;
     const buyI=new Set(),selI=new Set();
