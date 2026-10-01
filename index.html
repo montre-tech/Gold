@@ -154,20 +154,25 @@ function aggregate(){
 
 function draw(){
   dirty=false;
-  const ps=[["AGGREGATE · "+srcs.filter(s=>s.on).map(s=>s.name).join(" + "),aggregate()],
+  if(!P.tf)return;
+  const A=aggregate();
+  // Current candle = newest bar seen on any source (not the device clock), so all panels share it
+  let nowK=0;for(const k of A.keys())nowK=Math.max(nowK,k);
+  if(!nowK)nowK=Math.floor(Date.now()/1000/P.tf)*P.tf;
+  const keys=Array.from({length:P.nb},(_,i)=>nowK-(P.nb-1-i)*P.tf);
+  // One price range for all panels so rows line up horizontally too
+  let lo=1e18,hi=-1e18;
+  for(const k of keys){const b=A.get(k);if(b)for(const r of b.lv.keys()){lo=Math.min(lo,r);hi=Math.max(hi,r)}}
+  const ps=[["AGGREGATE · "+srcs.filter(s=>s.on).map(s=>s.name).join(" + "),A],
             ...srcs.filter(s=>s.on).map(s=>[s.name+" · "+(s.sym||""),s.bars])];
   const id=ps.map(p=>p[0]).join("|"),w=$("wrap");
   if(w.dataset.k!==id){w.dataset.k=id;w.innerHTML=ps.map((p,i)=>`<div class="pt">${p[0]}</div><canvas id="c${i}"></canvas>`).join("")}
-  ps.forEach((p,i)=>drawFP($("c"+i),p[1]));
+  ps.forEach((p,i)=>drawFP($("c"+i),p[1],keys,lo,hi));
 }
 
-function drawFP(cv,bars){
+function drawFP(cv,bars,keys,lo,hi){
   if(!P.tf)return;
   // Same window for every panel: the last nb bars ending at the current bar
-  const nowK=Math.floor(Date.now()/1000/P.tf)*P.tf,
-        keys=Array.from({length:P.nb},(_,i)=>nowK-(P.nb-1-i)*P.tf);
-  let lo=1e18,hi=-1e18;
-  for(const k of keys){const bb=bars.get(k);if(bb)for(const r of bb.lv.keys()){lo=Math.min(lo,r);hi=Math.max(hi,r)}}
   if(lo>hi)return;
   const rows=hi-lo+1,W=PAD+keys.length*BW+20,H=rows*CH+FOOT+40;
   const dpr=devicePixelRatio||1;
