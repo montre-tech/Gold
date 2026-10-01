@@ -15,12 +15,13 @@ button{width:auto;background:#2563eb;border:0;padding:6px 14px;cursor:pointer}
 #st{margin-left:auto;font-size:12px;color:#8a95a5;align-self:center}
 #wrap{flex:1;overflow:auto}
 canvas{display:block}
+.pt{padding:6px 10px;background:#1a2029;font-weight:600;position:sticky;left:0;border-top:2px solid #2563eb}
 </style>
 </head>
 <body>
 <div id="bar">
  <label>Market<select id="mk"><option value="fut">Futures</option><option value="spot">Spot</option></select></label>
- <label>Symbol<select id="sy" style="width:170px">
+ <label><span><input type="checkbox" id="o0" checked style="width:auto"> Binance</span><select id="sy" style="width:170px">
   <option value="XAUUSDT|fut|0.5">Gold (XAUUSDT perp)</option>
   <option value="PAXGUSDT|spot|0.5">Gold token (PAXGUSDT spot)</option>
   <option value="XAGUSDT|fut|0.05">Silver (XAGUSDT perp)</option>
@@ -30,6 +31,8 @@ canvas{display:block}
   <option value="custom">Custom…</option>
  </select></label>
  <label id="cl" style="display:none">Custom<input id="cs" value="BTCUSDT"></label>
+ <label><span><input type="checkbox" id="ob" checked style="width:auto"> Bybit</span><input id="sb" value="XAUTUSDT"></label>
+ <label><span><input type="checkbox" id="og" checked style="width:auto"> Bitget</span><input id="sg" value="XAUUSDT"></label>
  <label>Timeframe<select id="tf"><option value="60">1m</option><option value="300" selected>5m</option><option value="900">15m</option><option value="3600">1h</option></select></label>
  <label>Row size ($)<input id="rs" type="number" value="10" step="any" min="0"></label>
  <label>Bars<input id="nb" type="number" value="8" min="2" max="40"></label>
@@ -40,7 +43,7 @@ canvas{display:block}
  <span id="st">idle</span>
 </div>
 <div style="padding:4px 8px;font-size:11px;color:#6b7686">Bias tags: D=delta · A=absorption · E=exhaustion · S=stacked imbalance · P=close vs POC (+ bullish, − bearish, 0 neutral) · "~" = bar still forming · educational only, not financial advice</div>
-<div id="wrap"><canvas id="cv"></canvas></div>
+<div id="wrap"></div>
 <script>
 const $=id=>document.getElementById(id);
 let bars=new Map(),ws=null,lastId=0,gen=0,P={},dirty=false;
@@ -49,9 +52,9 @@ const BW=135,CH=16,PAD=60,FOOT=135;
 function mix(a,b,t){t=Math.max(0,Math.min(1,t));return`rgb(${a.map((v,i)=>Math.round(v+(b[i]-v)*t)).join(",")})`}
 const NEU=[38,44,54],BUY=[22,163,74],SEL=[220,38,38];
 
-function addTrade(T,p,q,m){
+function addTrade(T,p,q,m,B=bars){
   const ts=Math.floor(T/1000/P.tf)*P.tf;
-  let b=bars.get(ts);if(!b){b={t:ts,lv:new Map(),o:p,c:p};bars.set(ts,b)}b.c=p;
+  let b=B.get(ts);if(!b){b={t:ts,lv:new Map(),o:p,c:p,ct:0};B.set(ts,b)}b.c=p;b.ct=T;
   const r=Math.floor(p/P.rs+1e-9);
   let l=b.lv.get(r);if(!l){l=[0,0];b.lv.set(r,l)}
   l[m?0:1]+=q;           // m=true -> buyer is maker -> seller aggressor -> hits BID
@@ -63,7 +66,10 @@ async function load(){
   const sv=$("sy").value;
   P={mk:$("mk").value,sy:sv==="custom"?$("cs").value.trim().toUpperCase():sv.split("|")[0],tf:+$("tf").value,rs:+$("rs").value||1,
      nb:+$("nb").value,ir:+$("ir").value,mv:+$("mv").value,sc:+$("sc").value};
-  bars=new Map();lastId=0;
+  srcs.forEach((s,i)=>{s.bars=new Map();s.on=$(["o0","ob","og"][i]).checked;if(s.ws){s.ws.onclose=null;s.ws.close()}});
+  bars=srcs[0].bars;lastId=0;srcs[0].sym=P.sy;
+  startExtra(g);
+  if(!srcs[0].on){$("st").textContent="Binance off";draw();return}
   const rest=P.mk==="spot"?"https://api.binance.com/api/v3/aggTrades":"https://fapi.binance.com/fapi/v1/aggTrades";
   let start=(Math.floor(Date.now()/1000/P.tf)-(P.nb-1))*P.tf*1000,from=null,n=0;
   try{
@@ -104,13 +110,62 @@ async function load(){
   };open();draw();
 }
 
+const srcs=[{name:"Binance",bars:new Map(),on:true},{name:"Bybit",bars:new Map(),on:true},{name:"Bitget",bars:new Map(),on:true}];
+
+function conn(s,url,sub,ping,onMsg,g){
+  const open=()=>{
+    const w=s.ws=new WebSocket(url);let pi;
+    w.onopen=()=>{w.send(JSON.stringify(sub));pi=setInterval(()=>w.readyState===1&&w.send(ping),20000)};
+    w.onmessage=e=>{if(e.data!=="pong")try{onMsg(JSON.parse(e.data))}catch(_){}};
+    w.onclose=()=>{clearInterval(pi);if(g===gen)setTimeout(open,2000)};
+  };open();
+}
+
+// Bybit (taker side S) and Bitget (side) — trade side maps to "sell = hits bid"
+function startExtra(g){
+  const [,A,G]=srcs;
+  if(A.on){
+    const sy=A.sym=$("sb").value.trim().toUpperCase();A.seen=new Set();
+    fetch(`https://api.bybit.com/v5/market/recent-trade?category=linear&symbol=${sy}&limit=1000`)
+      .then(r=>r.json()).then(j=>{if(g!==gen)return;
+        for(const x of ((j.result&&j.result.list)||[]).reverse()){A.seen.add(x.execId);addTrade(+x.time,+x.price,+x.size,x.side==="Sell",A.bars)}})
+      .catch(()=>{});
+    conn(A,"wss://stream.bybit.com/v5/public/linear",{op:"subscribe",args:["publicTrade."+sy]},'{"op":"ping"}',
+      m=>{if(m.topic&&m.data)for(const x of m.data){if(A.seen.has(x.i))continue;addTrade(+x.T,+x.p,+x.v,x.S==="Sell",A.bars)}},g);
+  }
+  if(G.on){
+    const sy=G.sym=$("sg").value.trim().toUpperCase();
+    conn(G,"wss://ws.bitget.com/v2/ws/public",{op:"subscribe",args:[{instType:"USDT-FUTURES",channel:"trade",instId:sy}]},"ping",
+      m=>{if(m.data&&m.arg&&m.arg.channel==="trade")for(const x of m.data)addTrade(+x.ts,+x.price,+x.size,x.side==="sell",G.bars)},g);
+  }
+}
+
+// Sum bid/ask volume per price row across every enabled source
+function aggregate(){
+  const A=new Map();
+  for(const s of srcs)if(s.on)for(const[k,b]of s.bars){
+    let a=A.get(k);if(!a){a={t:k,lv:new Map(),o:b.o,c:b.c,ct:0};A.set(k,a)}
+    if(b.ct>=a.ct){a.ct=b.ct;a.c=b.c}
+    for(const[r,[bd,ak]]of b.lv){const l=a.lv.get(r);if(l){l[0]+=bd;l[1]+=ak}else a.lv.set(r,[bd,ak])}
+  }
+  return A;
+}
+
 function draw(){
   dirty=false;
+  const ps=[["AGGREGATE · "+srcs.filter(s=>s.on).map(s=>s.name).join(" + "),aggregate()],
+            ...srcs.filter(s=>s.on).map(s=>[s.name+" · "+(s.sym||""),s.bars])];
+  const id=ps.map(p=>p[0]).join("|"),w=$("wrap");
+  if(w.dataset.k!==id){w.dataset.k=id;w.innerHTML=ps.map((p,i)=>`<div class="pt">${p[0]}</div><canvas id="c${i}"></canvas>`).join("")}
+  ps.forEach((p,i)=>drawFP($("c"+i),p[1]));
+}
+
+function drawFP(cv,bars){
   const keys=[...bars.keys()].sort((a,b)=>a-b).slice(-P.nb);if(!keys.length)return;
   let lo=1e18,hi=-1e18;
   for(const k of keys)for(const r of bars.get(k).lv.keys()){lo=Math.min(lo,r);hi=Math.max(hi,r)}
   const rows=hi-lo+1,W=PAD+keys.length*BW+20,H=rows*CH+FOOT+40;
-  const cv=$("cv"),dpr=devicePixelRatio||1;
+  const dpr=devicePixelRatio||1;
   cv.width=W*dpr;cv.height=H*dpr;cv.style.width=W+"px";cv.style.height=H+"px";
   const c=cv.getContext("2d");c.scale(dpr,dpr);c.fillStyle="#10141a";c.fillRect(0,0,W,H);
   c.font="11px ui-monospace,Menlo,Consolas,monospace";c.textBaseline="middle";
@@ -199,6 +254,7 @@ $("sy").onchange=()=>{
   if(v!=="custom"){const[,m,r]=v.split("|");$("mk").value=m;$("rs").value=r;load()}
 };
 $("go").onclick=load;
+["o0","ob","og"].forEach(i=>$(i).onchange=load);
 (function loop(){if(dirty)draw();setTimeout(loop,250)})();
 $("sy").onchange();
 </script>
