@@ -38,18 +38,35 @@ jobs:
         with:
           node-version: "20"
 
-      - name: Download from Dukascopy
+      - name: Download from Dukascopy (monthly chunks, with retries)
         run: |
-          npx --yes dukascopy-node \
-            -i "${{ inputs.instrument }}" \
-            -from "${{ inputs.from_date }}" \
-            -to "${{ inputs.to_date }}" \
-            -t "${{ inputs.timeframe }}" \
-            -f csv \
-            -v true \
-            -r 5 \
-            -bs 10 -bp 1000
+          START="${{ inputs.from_date }}"
+          END="${{ inputs.to_date }}"
+          INSTRUMENT="${{ inputs.instrument }}"
+          TF="${{ inputs.timeframe }}"
+          mkdir -p download
+          FAILED=""
+          CUR="$START"
+          while [[ "$CUR" < "$END" ]]; do
+            NEXT=$(date -d "$CUR +1 month" +%F)
+            if [[ "$NEXT" > "$END" ]]; then NEXT="$END"; fi
+            OK=0
+            for ATTEMPT in 1 2 3 4 5 6; do
+              echo "== $CUR -> $NEXT (attempt $ATTEMPT)"
+              if npx --yes dukascopy-node -i "$INSTRUMENT" -from "$CUR" -to "$NEXT" \
+                   -t "$TF" -f csv -v true -r 8 -rp 5000 -bs 2 -bp 3000; then
+                OK=1; break
+              fi
+              sleep $((ATTEMPT * 45))   # back off when rate limited (HTTP 429)
+            done
+            if [[ $OK -eq 0 ]]; then FAILED="$FAILED $CUR"; fi
+            sleep 5
+            CUR="$NEXT"
+          done
           ls -la download
+          if [[ -n "$FAILED" ]]; then
+            echo "::warning::These chunks failed and are MISSING from the data:$FAILED"
+          fi
 
       - name: Convert to MT4 format
         run: |
