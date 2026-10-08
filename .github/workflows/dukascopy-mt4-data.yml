@@ -1,0 +1,73 @@
+name: Fetch Dukascopy data for MT4
+
+on:
+  workflow_dispatch:
+    inputs:
+      instrument:
+        description: "Dukascopy instrument, lowercase (xauusd, eurusd, gbpusd, usdjpy, xagusd...)"
+        default: "xauusd"
+      timeframe:
+        description: "Candle size"
+        type: choice
+        default: "m5"
+        options: ["m1", "m5", "m15", "m30", "h1", "h4"]
+      from_date:
+        description: "Start date (YYYY-MM-DD)"
+        default: "2024-01-01"
+      to_date:
+        description: "End date (YYYY-MM-DD)"
+        default: "2026-10-01"
+      dst_tz:
+        description: "Your broker's server timezone"
+        default: "Europe/Athens"
+      digits:
+        description: "Price digits (XAUUSD usually 2, EURUSD 5, USDJPY 3)"
+        default: "2"
+      spread:
+        description: "Fixed spread in points for the .hst file"
+        default: "25"
+
+jobs:
+  fetch:
+    runs-on: ubuntu-latest
+    timeout-minutes: 360
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+
+      - name: Download from Dukascopy
+        run: |
+          npx --yes dukascopy-node \
+            -i "${{ inputs.instrument }}" \
+            -from "${{ inputs.from_date }}" \
+            -to "${{ inputs.to_date }}" \
+            -t "${{ inputs.timeframe }}" \
+            -f csv \
+            -v true \
+            -r 5 \
+            -bs 10 -bp 1000
+          ls -la download
+
+      - name: Convert to MT4 format
+        run: |
+          TF="${{ inputs.timeframe }}"
+          case "$TF" in
+            m1) P=1;; m5) P=5;; m15) P=15;; m30) P=30;; h1) P=60;; h4) P=240;;
+          esac
+          python3 dukascopy_to_mt4.py \
+            --symbol "$(echo '${{ inputs.instrument }}' | tr '[:lower:]' '[:upper:]')" \
+            --period "$P" \
+            --dst-tz "${{ inputs.dst_tz }}" \
+            --digits "${{ inputs.digits }}" \
+            --spread "${{ inputs.spread }}" \
+            --hst
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: mt4-${{ inputs.instrument }}-${{ inputs.timeframe }}
+          path: |
+            *.csv
+            *.hst
