@@ -1,0 +1,706 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Volume Profile · Pin Zones</title>
+<style>
+:root{
+  --bg:#ffffff; --panel:#f3f4f6; --text:#111827; --muted:#6b7280; --grid:#e5e7eb; --border:#d1d5db;
+  --up:#16a34a; --down:#dc2626; --accent:#2563eb; --band:rgba(37,99,235,.07);
+  --boundary:#9ca3af; --cross:#6b7280; --poc:#ef4444; --valine:#f59e0b; --warn:#b45309;
+}
+@media (prefers-color-scheme: dark){
+  :root{
+    --bg:#0f1115; --panel:#171a21; --text:#e5e7eb; --muted:#9ca3af; --grid:#222733; --border:#2b3140;
+    --up:#22c55e; --down:#ef4444; --accent:#60a5fa; --band:rgba(96,165,250,.09);
+    --boundary:#6b7280; --cross:#9ca3af; --warn:#fbbf24;
+  }
+}
+*{box-sizing:border-box}
+[hidden]{display:none!important}
+html,body{height:100%;margin:0}
+body{
+  background:var(--bg);color:var(--text);
+  font:14px/1.4 system-ui,-apple-system,"Segoe UI",Roboto,sans-serif;
+  display:flex;flex-direction:column;
+  padding:env(safe-area-inset-top) env(safe-area-inset-right) env(safe-area-inset-bottom) env(safe-area-inset-left);
+}
+.bar{display:flex;flex-wrap:wrap;gap:8px 10px;align-items:flex-end;padding:8px 10px;background:var(--panel);border-bottom:1px solid var(--border)}
+.bar label{display:flex;flex-direction:column;gap:2px;font-size:11px;color:var(--muted)}
+.bar select,.bar input[type=text],.bar input[type=number],.bar input[type=file]{
+  font:inherit;font-size:13px;color:var(--text);background:var(--bg);border:1px solid var(--border);border-radius:6px;padding:5px 7px;max-width:100%}
+.bar input[type=number]{width:78px}
+.bar input[type=text]{width:110px}
+button{font:inherit;font-size:13px;color:#fff;background:var(--accent);border:0;border-radius:6px;padding:7px 14px;cursor:pointer}
+button.ghost{color:var(--text);background:var(--bg);border:1px solid var(--border);padding:5px 10px}
+details.more{flex-basis:100%}
+details.more summary{cursor:pointer;font-size:12px;color:var(--muted);user-select:none}
+.grid{display:flex;flex-wrap:wrap;gap:8px 14px;align-items:flex-end;padding-top:8px}
+.grid .chk{flex-direction:row;align-items:center;gap:6px;font-size:12px;color:var(--text)}
+.info{padding:6px 10px;font-size:12px;border-bottom:1px solid var(--border);display:flex;flex-direction:column;gap:2px;min-height:34px}
+.info .k{font-weight:600}.info .up{color:var(--up);font-weight:600}.info .down{color:var(--down);font-weight:600}
+.info .m{color:var(--muted)}.info .warn{color:var(--warn)}
+.sw{display:inline-block;width:9px;height:9px;border-radius:2px;margin-right:5px;vertical-align:baseline}
+#status{color:var(--muted)}
+main{flex:1;min-height:0;position:relative}
+canvas{position:absolute;inset:0;touch-action:none;cursor:crosshair;display:block}
+.zoom{position:absolute;right:76px;bottom:30px;display:flex;gap:4px}
+.zoom button{width:30px;height:30px;padding:0;font-size:16px;line-height:1}
+footer{padding:4px 10px;font-size:11px;color:var(--muted);border-top:1px solid var(--border)}
+</style>
+</head>
+<body>
+
+<header class="bar">
+  <label>Source
+    <select id="source">
+      <option value="binance">Binance (crypto, live)</option>
+      <option value="csv">CSV file (MT4/MT5 export)</option>
+      <option value="demo">Demo data</option>
+    </select>
+  </label>
+  <label id="symWrap">Symbol
+    <input id="symbol" type="text" value="BTCUSDT" spellcheck="false" autocapitalize="characters" autocomplete="off">
+  </label>
+  <label id="fileWrap" hidden>File
+    <input id="file" type="file" accept=".csv,.txt,.tsv">
+  </label>
+  <label>Chart timeframe
+    <select id="tf">
+      <option value="1m">1m</option><option value="5m">5m</option>
+      <option value="15m" selected>15m</option><option value="30m">30m</option>
+      <option value="1h">1h</option><option value="4h">4h</option>
+    </select>
+  </label>
+  <label>Anchor candle
+    <select id="anchor">
+      <option value="1h">Previous hour</option><option value="4h">Previous 4H</option>
+      <option value="1d" selected>Previous day</option><option value="1w">Previous week</option>
+      <option value="1M">Previous month</option>
+    </select>
+  </label>
+  <label>Mode
+    <select id="mode">
+      <option value="pin">Pin zones (2 profiles)</option>
+      <option value="whole">Whole candle (1 profile)</option>
+    </select>
+  </label>
+  <button id="load" type="button">Load</button>
+
+  <details class="more">
+    <summary>Settings</summary>
+    <div class="grid">
+      <label>Day boundary offset (hours vs UTC)<input id="offset" type="number" value="0" step="1" min="-12" max="14"></label>
+      <label>Rows per profile<input id="rows" type="number" value="30" min="5" max="200"></label>
+      <label>Value area %<input id="va" type="number" value="70" min="10" max="100"></label>
+      <label>Profile width (bars)<input id="width" type="number" value="25" min="5" max="200"></label>
+      <label>Pin wick/body ratio<input id="pinRatio" type="number" value="2" step="0.1" min="0.5"></label>
+      <label>Pin max body %<input id="pinBody" type="number" value="35" min="5" max="100"></label>
+      <label class="chk"><input id="showPOC" type="checkbox" checked>POC</label>
+      <label class="chk"><input id="showVA" type="checkbox" checked>VAH / VAL</label>
+      <label class="chk"><input id="showBounds" type="checkbox" checked>Candle High/Open/Close/Low</label>
+      <label class="chk"><input id="extend" type="checkbox" checked>Extend lines across chart</label>
+      <label class="chk"><input id="hiSrc" type="checkbox" checked>Shade anchor candle period</label>
+      <label class="chk"><input id="pins" type="checkbox" checked>Mark pin bars</label>
+      <label class="chk"><input id="live" type="checkbox" checked>Live refresh (Binance)</label>
+    </div>
+  </details>
+</header>
+
+<section class="info" id="info" aria-live="polite"></section>
+
+<main id="wrap">
+  <canvas id="cv"></canvas>
+  <div class="zoom">
+    <button class="ghost" id="zin" type="button" title="Zoom in">+</button>
+    <button class="ghost" id="zout" type="button" title="Zoom out">−</button>
+    <button class="ghost" id="zreset" type="button" title="Reset view">⟲</button>
+  </div>
+</main>
+
+<footer>Times shown in UTC (CSV: as exported). Volume = exchange volume (Binance) or tick volume (CSV). Educational tool, not financial advice.</footer>
+
+<script>
+// <core>
+// ---------------------------------------------------------------------------
+// CORE: pure logic (no DOM). Mirrors the MT5/MT4 indicator's math.
+// ---------------------------------------------------------------------------
+const MIN=60e3, HOUR=3600e3, DAY=86400e3, WEEK=7*DAY, MONDAY0=4*DAY; // 1970-01-05 was a Monday
+const TF_MS={'1m':MIN,'5m':5*MIN,'15m':15*MIN,'30m':30*MIN,'1h':HOUR,'4h':4*HOUR};
+const ANCHOR_LABEL={'1h':'Prev Hour','4h':'Prev 4H','1d':'Prev Day','1w':'Prev Week','1M':'Prev Month'};
+const clamp=(v,a,b)=>Math.max(a,Math.min(b,v));
+
+// Start time of the anchor period containing `ts`. `offH` shifts the boundary (hours vs UTC).
+function anchorStartOf(ts,anchor,offH){
+  const off=(offH||0)*HOUR, t=ts-off;
+  if(anchor==='1M'){const d=new Date(t);return Date.UTC(d.getUTCFullYear(),d.getUTCMonth(),1)+off;}
+  if(anchor==='1w'){return Math.floor((t-MONDAY0)/WEEK)*WEEK+MONDAY0+off;}
+  const p=anchor==='1d'?DAY:anchor==='4h'?4*HOUR:HOUR;
+  return Math.floor(t/p)*p+off;
+}
+function lowerBound(bars,t){let lo=0,hi=bars.length;while(lo<hi){const m=(lo+hi)>>1;if(bars[m].t<t)lo=m+1;else hi=m;}return lo;}
+
+// Finds the most recent COMPLETED anchor candle that has data (walks back over gaps such as weekends).
+// OHLC is aggregated from the chart's own bars, so it always matches the data on screen.
+function findAnchor(bars,anchor,offH,barMs){
+  if(!bars.length)return null;
+  const curStart=anchorStartOf(bars[bars.length-1].t,anchor,offH);
+  let end=curStart;
+  for(let k=0;k<10;k++){
+    const start=anchorStartOf(end-1,anchor,offH);
+    const i0=lowerBound(bars,start), i1=lowerBound(bars,end);
+    if(i1>i0){
+      let h=-Infinity,l=Infinity;
+      for(let i=i0;i<i1;i++){if(bars[i].h>h)h=bars[i].h;if(bars[i].l<l)l=bars[i].l;}
+      const o=bars[i0].o,c=bars[i1-1].c;
+      return{start,end,curStart,i0,i1,count:i1-i0,o,h,l,c,bull:c>=o,
+        bodyTop:Math.max(o,c),bodyBottom:Math.min(o,c),partial:(i0===0&&bars[0].t>start+barMs)};
+    }
+    end=start;
+  }
+  return null;
+}
+
+// Volume histogram clipped to [zoneLow, zoneHigh]. Same algorithm as the indicator:
+// each bar's volume is scaled by the share of its range inside the zone, then split evenly across the bins it spans.
+function buildHistogram(src,zoneLow,zoneHigh,rows,vaPct){
+  const out={zoneLow,zoneHigh,rows,binSize:0,bins:new Array(rows).fill(0),inVA:new Array(rows).fill(false),
+    poc:-1,total:0,lowB:0,highB:0,pocPrice:NaN,vah:NaN,val:NaN};
+  if(!(zoneHigh>zoneLow))return out;
+  const bs=(zoneHigh-zoneLow)/rows; out.binSize=bs;
+  for(const b of src){
+    const h=Math.min(b.h,zoneHigh), l=Math.max(b.l,zoneLow);
+    if(h<=l)continue;
+    let full=b.h-b.l; if(full<=0)full=1e-12;
+    const v=(b.v||0)*((h-l)/full);
+    let s=Math.floor((l-zoneLow)/bs), e=Math.floor((h-zoneLow)/bs);
+    s=clamp(s,0,rows-1); e=clamp(e,0,rows-1);
+    const per=v/(e-s+1);
+    for(let k=s;k<=e;k++)out.bins[k]+=per;
+  }
+  let poc=0;for(let k=1;k<rows;k++)if(out.bins[k]>out.bins[poc])poc=k;
+  let total=0;for(const v of out.bins)total+=v;
+  out.total=total;
+  if(total<=0)return out;
+  out.poc=poc;
+  // Value area: expand outward from the POC until vaPct% of the zone's volume is covered
+  let vaVol=out.bins[poc],lowB=poc,highB=poc; out.inVA[poc]=true;
+  const target=total*vaPct/100;
+  while(vaVol<target&&(lowB>0||highB<rows-1)){
+    const below=lowB>0?out.bins[lowB-1]:-1, above=highB<rows-1?out.bins[highB+1]:-1;
+    if(above>=below&&highB<rows-1){highB++;vaVol+=out.bins[highB];out.inVA[highB]=true;}
+    else if(lowB>0){lowB--;vaVol+=out.bins[lowB];out.inVA[lowB]=true;}
+    else break;
+  }
+  out.lowB=lowB;out.highB=highB;
+  out.pocPrice=zoneLow+poc*bs+bs/2; out.vah=zoneLow+(highB+1)*bs; out.val=zoneLow+lowB*bs;
+  return out;
+}
+
+// pin mode  -> upper zone [max(open,close) .. high] and lower zone [low .. min(open,close)]
+// whole mode -> a single profile over [low .. high]
+function computeProfiles(bars,A,mode,rows,vaPct){
+  const src=bars.slice(A.i0,A.i1);
+  if(mode==='whole')return{mode,src,zones:[buildHistogram(src,A.l,A.h,rows,vaPct)]};
+  return{mode,src,zones:[buildHistogram(src,A.bodyTop,A.h,rows,vaPct),buildHistogram(src,A.l,A.bodyBottom,rows,vaPct)]};
+}
+
+// Only the candle that made the period's HIGH (upper pin?) and the candle that made its LOW (lower pin?) are tested.
+function detectPins(src,ratio,maxBodyPct){
+  const res={up:-1,down:-1}; if(!src.length)return res;
+  let iH=0,iL=0;
+  for(let i=1;i<src.length;i++){if(src[i].h>=src[iH].h)iH=i;if(src[i].l<=src[iL].l)iL=i;}
+  const m=i=>{const b=src[i],range=b.h-b.l;if(range<=0)return null;
+    const body=Math.abs(b.c-b.o);
+    return{bodyS:Math.max(body,range*1e-6),pct:body/range*100,up:b.h-Math.max(b.o,b.c),lo:Math.min(b.o,b.c)-b.l};};
+  let x=m(iH); if(x&&x.pct<=maxBodyPct&&x.up>=ratio*x.bodyS&&x.up>x.lo)res.up=iH;
+  x=m(iL);     if(x&&x.pct<=maxBodyPct&&x.lo>=ratio*x.bodyS&&x.lo>x.up)res.down=iL;
+  return res;
+}
+
+// ----- demo data (seeded random walk, forex-like) -----
+function mulberry32(a){return function(){a|=0;a=a+0x6D2B79F5|0;let t=Math.imul(a^a>>>15,1|a);t=t+Math.imul(t^t>>>7,61|t)^t;return((t^t>>>14)>>>0)/4294967296;};}
+function genDemo(tfMs,spanMs,endMs,seed){
+  const rnd=mulberry32(seed||7);
+  const gauss=()=>{let u=0,v=0;while(!u)u=rnd();while(!v)v=rnd();return Math.sqrt(-2*Math.log(u))*Math.cos(2*Math.PI*v);};
+  const n=Math.max(60,Math.min(8000,Math.floor(spanMs/tfMs)));
+  const end=Math.floor(endMs/tfMs)*tfMs, start=end-(n-1)*tfMs, scale=Math.sqrt(tfMs/(15*MIN));
+  const bars=[]; let price=1.0850;
+  for(let i=0;i<n;i++){
+    const t=start+i*tfMs, d=new Date(t), hr=d.getUTCHours()+d.getUTCMinutes()/60;
+    const sess=0.5+Math.exp(-Math.pow((hr-14)/3.5,2))*1.4+Math.exp(-Math.pow((hr-8)/2.5,2))*0.9;
+    const sig=0.00028*sess*scale, o=price, c=o+gauss()*sig;
+    const h=Math.max(o,c)+Math.abs(gauss())*sig*0.7, l=Math.min(o,c)-Math.abs(gauss())*sig*0.7;
+    const v=Math.round((80+rnd()*220)*sess*(1+Math.abs(c-o)/sig*0.3)*scale);
+    const r=x=>Math.round(x*1e5)/1e5;
+    bars.push({t,o:r(o),h:r(h),l:r(l),c:r(c),v}); price=c;
+  }
+  return bars;
+}
+
+// ----- CSV import (MT4 History Center, MT5 "Export Bars", or generic) -----
+function parseTs(dateStr,timeStr){
+  let s=String(dateStr).trim();
+  if(/^\d{10,13}$/.test(s)){const n=Number(s);return n<1e12?n*1000:n;}
+  if(timeStr!=null){
+    let tm=String(timeStr).trim(); if(/^\d{1,2}:\d{2}$/.test(tm))tm+=':00';
+    s=s.replace(/\./g,'-')+'T'+tm.padStart(8,'0')+'Z';
+  }else{
+    s=s.replace(/^(\d{4})\.(\d{2})\.(\d{2})/,'$1-$2-$3').replace(' ','T');
+    if(!/(Z|[+-]\d{2}:?\d{2})$/.test(s))s+='Z';
+  }
+  return Date.parse(s);
+}
+function parseCSV(text){
+  const lines=text.split(/\r?\n/).filter(l=>l.trim().length);
+  if(!lines.length)throw new Error('The file is empty');
+  const delim=lines[0].includes('\t')?'\t':(lines[0].includes(';')&&!lines[0].includes(','))?';':',';
+  const first=lines[0].split(delim).map(s=>s.trim().replace(/^<|>$/g,'').toLowerCase());
+  const isHeader=first.some(x=>/^(date|time|timestamp|datetime|open|high|low|close|tickvol|vol|volume)$/.test(x));
+  const col={}; let start=0;
+  if(isHeader){
+    start=1; first.forEach((n,i)=>{if(!(n in col))col[n]=i;});
+    col.vol=('tickvol' in col)?col.tickvol:('volume' in col)?col.volume:col.vol;
+    if(!('datetime' in col)&&!('timestamp' in col)&&!('date' in col)){
+      if('time' in col)col.timestamp=col.time; // a single "time" column that holds the full timestamp
+      else throw new Error('No date/time column found');
+    }
+  }else{
+    const c2=lines[0].split(delim)[1]||'';
+    if(/^\d{1,2}:\d{2}/.test(c2.trim()))Object.assign(col,{date:0,time:1,open:2,high:3,low:4,close:5,vol:6});
+    else Object.assign(col,{timestamp:0,open:1,high:2,low:3,close:4,vol:5});
+  }
+  const bars=[];
+  for(let i=start;i<lines.length;i++){
+    const p=lines[i].split(delim).map(s=>s.trim());
+    let t;
+    if('datetime' in col)t=parseTs(p[col.datetime]);
+    else if('timestamp' in col)t=parseTs(p[col.timestamp]);
+    else t=parseTs(p[col.date],('time' in col)?p[col.time]:undefined);
+    const o=+p[col.open],h=+p[col.high],l=+p[col.low],c=+p[col.close],v=+(p[col.vol]||0);
+    if(!Number.isFinite(t)||![o,h,l,c].every(Number.isFinite))continue;
+    bars.push({t,o,h,l,c,v:Number.isFinite(v)?v:0});
+  }
+  if(bars.length<10)throw new Error('Could not read OHLC rows (found '+bars.length+')');
+  bars.sort((a,b)=>a.t-b.t);
+  const uniq=bars.filter((b,i)=>i===0||b.t!==bars[i-1].t);
+  const d=[];for(let i=1;i<Math.min(uniq.length,500);i++)d.push(uniq[i].t-uniq[i-1].t);
+  d.sort((a,b)=>a-b);
+  return{bars:uniq,tfMs:d[d.length>>1]||MIN};
+}
+
+// ----- formatting -----
+function decimalsFor(p){p=Math.abs(p);return p<0.1?6:p<10?5:p<1000?3:2;}
+function fmtP(p,d){return Number.isFinite(p)?p.toFixed(d):'–';}
+const pad2=n=>String(n).padStart(2,'0');
+const MON=['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];
+function fmtDate(t){const d=new Date(t);return MON[d.getUTCMonth()]+' '+d.getUTCDate();}
+function fmtHM(t){const d=new Date(t);return pad2(d.getUTCHours())+':'+pad2(d.getUTCMinutes());}
+function fmtFull(t){const d=new Date(t);return d.getUTCFullYear()+'-'+pad2(d.getUTCMonth()+1)+'-'+pad2(d.getUTCDate())+' '+fmtHM(t);}
+function niceStep(raw){const p=Math.pow(10,Math.floor(Math.log10(raw))),m=raw/p;return(m<=1?1:m<=2?2:m<=5?5:10)*p;}
+// </core>
+
+// <render>
+// ---------------------------------------------------------------------------
+// RENDER: draws candles + indicator on a 2D canvas. Pure function of its inputs.
+// ---------------------------------------------------------------------------
+const AXIS_W=68, AXIS_H=22, TOP_PAD=8;
+const FONT='11px system-ui,-apple-system,"Segoe UI",Roboto,sans-serif';
+const NICE_STEPS=[1,2,3,4,5,6,8,10,12,15,20,24,30,40,48,50,60,80,96,100,120,150,200,288,500,1000,2000];
+
+function drawChart(ctx,W,H,st,th){
+  const L=0,R=W-AXIS_W,T=TOP_PAD,B=H-AXIS_H,PW=R-L,PH=B-T;
+  ctx.save();
+  ctx.fillStyle=th.bg;ctx.fillRect(0,0,W,H);
+  ctx.font=FONT;ctx.textBaseline='middle';
+  const bars=st.bars;
+  if(!bars.length){ctx.fillStyle=th.muted;ctx.textAlign='center';ctx.fillText('No data loaded',W/2,H/2);ctx.restore();return{L,R,T,B,PW,PH,lo:0,hi:1};}
+
+  const bw=st.view.barW,s0=st.view.start,o=st.opts,A=st.anchor,P=st.prof,d=st.dec;
+  const xi=i=>L+(i-s0)*bw+bw/2;
+  const i0=Math.max(0,Math.floor(s0)-1),i1=Math.min(bars.length-1,Math.ceil(s0+PW/bw)+1);
+
+  let lo=Infinity,hi=-Infinity;
+  for(let i=i0;i<=i1;i++){if(bars[i].l<lo)lo=bars[i].l;if(bars[i].h>hi)hi=bars[i].h;}
+  if(A&&P){lo=Math.min(lo,A.l);hi=Math.max(hi,A.h);}
+  if(!Number.isFinite(lo)||!Number.isFinite(hi)||hi<=lo){const c=bars[bars.length-1].c;lo=c*0.99;hi=c*1.01;}
+  const pad=(hi-lo)*0.06;lo-=pad;hi+=pad;
+  const yp=p=>T+(hi-p)/(hi-lo)*PH;
+  const layout={L,R,T,B,PW,PH,lo,hi};
+
+  // ---- plot area (clipped) ----
+  ctx.save();
+  ctx.beginPath();ctx.rect(L,T,PW,PH);ctx.clip();
+
+  // horizontal grid
+  const pstep=niceStep((hi-lo)/Math.max(2,PH/55));
+  const gridLabels=[];
+  ctx.strokeStyle=th.grid;ctx.lineWidth=1;
+  for(let p=Math.ceil(lo/pstep)*pstep;p<hi;p+=pstep){
+    const y=Math.round(yp(p))+0.5;ctx.beginPath();ctx.moveTo(L,y);ctx.lineTo(R,y);ctx.stroke();gridLabels.push(p);
+  }
+  // vertical grid + time labels
+  const raw=Math.ceil(110/bw);let step=NICE_STEPS.find(s=>s>=raw)||raw;
+  const timeLabels=[];
+  for(let i=Math.max(0,Math.floor(s0));i<=i1;i++){
+    if(i%step!==0)continue;
+    const x=Math.round(xi(i))+0.5;ctx.beginPath();ctx.moveTo(x,T);ctx.lineTo(x,B);ctx.stroke();
+    const t=bars[i].t,dd=new Date(t);
+    const midnight=dd.getUTCHours()===0&&dd.getUTCMinutes()===0;
+    timeLabels.push({x,txt:(st.tfMs>=DAY||midnight)?fmtDate(t):fmtHM(t)});
+  }
+
+  // shade the anchor candle's period
+  if(o.hiSrc&&A){
+    ctx.fillStyle=th.band;
+    const x1=xi(A.i0)-bw/2,x2=xi(A.i1-1)+bw/2;ctx.fillRect(x1,T,x2-x1,PH);
+  }
+
+  // candles
+  const bodyW=Math.max(1,Math.round(bw*0.68));
+  for(let i=i0;i<=i1;i++){
+    const b=bars[i],x=Math.round(xi(i)),up=b.c>=b.o;
+    ctx.strokeStyle=ctx.fillStyle=up?th.up:th.down;ctx.lineWidth=1;
+    ctx.beginPath();ctx.moveTo(x+0.5,yp(b.h));ctx.lineTo(x+0.5,yp(b.l));ctx.stroke();
+    const y1=yp(Math.max(b.o,b.c)),y2=yp(Math.min(b.o,b.c));
+    ctx.fillRect(x-Math.floor(bodyW/2),y1,bodyW,Math.max(1,y2-y1));
+  }
+
+  // ---- indicator ----
+  const axisTags=[];
+  if(A&&P){
+    const lab=st.anchorLabel,xL=xi(bars.length-1)+bw*1.5,maxW=o.widthBars*bw,xEnd=xL+maxW;
+    const pal=P.mode==='whole'?[[th.upperBase,th.upperVA]]:[[th.upperBase,th.upperVA],[th.lowerBase,th.lowerVA]];
+
+    P.zones.forEach((Z,zi)=>{
+      if(Z.poc<0)return;
+      const[base,va]=pal[zi],maxV=Z.bins[Z.poc];
+      ctx.globalAlpha=0.75;
+      for(let k=0;k<Z.rows;k++){
+        const v=Z.bins[k];if(v<=0)continue;
+        const pLo=Z.zoneLow+k*Z.binSize,pHi=pLo+Z.binSize,y1=yp(pHi),y2=yp(pLo);
+        ctx.fillStyle=k===Z.poc?th.poc:(Z.inVA[k]?va:base);
+        ctx.fillRect(xL,y1,Math.max(0.3*bw,v/maxV*maxW),Math.max(1,y2-y1-0.5));
+      }
+      ctx.globalAlpha=1;
+    });
+
+    // reference levels
+    const lv=[];
+    if(o.showBounds){
+      lv.push({p:A.h,c:th.boundary,dash:[5,3,1,3],w:1,txt:lab+' High'});
+      lv.push({p:A.l,c:th.boundary,dash:[5,3,1,3],w:1,txt:lab+' Low'});
+      if(P.mode==='pin'){
+        lv.push({p:A.bodyTop,c:th.boundary,dash:[5,3,1,3],w:1,txt:lab+(A.bull?' Close':' Open')});
+        lv.push({p:A.bodyBottom,c:th.boundary,dash:[5,3,1,3],w:1,txt:lab+(A.bull?' Open':' Close')});
+      }
+    }
+    P.zones.forEach((Z,zi)=>{
+      if(Z.poc<0)return;
+      const tag=P.mode==='whole'?'':(zi===0?'U ':'L ');
+      if(o.showVA){
+        lv.push({p:Z.vah,c:th.valine,dash:[2,3],w:1,txt:tag+'VAH'});
+        lv.push({p:Z.val,c:th.valine,dash:[2,3],w:1,txt:tag+'VAL'});
+      }
+      if(o.showPOC){
+        lv.push({p:Z.pocPrice,c:th.poc,dash:[6,4],w:2,txt:tag+'POC '+fmtP(Z.pocPrice,d)});
+        axisTags.push({p:Z.pocPrice,c:th.poc});
+      }
+    });
+    // lines first
+    for(const q of lv){
+      q.y=Math.round(yp(q.p))+0.5;
+      const x1=o.extend?L:xL-bw*0.5;
+      ctx.strokeStyle=q.c;ctx.lineWidth=q.w;ctx.setLineDash(q.dash);
+      ctx.beginPath();ctx.moveTo(x1,q.y);ctx.lineTo(xEnd,q.y);ctx.stroke();ctx.setLineDash([]);
+    }
+    // labels: stacked so they never overlap each other (nudged downward when levels are close together)
+    lv.sort((a,b)=>a.y-b.y);
+    let prevY=-Infinity;
+    for(const q of lv){
+      let ly=q.y-7;if(ly<prevY+12)ly=prevY+12;prevY=ly;
+      const al=o.extend?'left':'right',lx=o.extend?L+6:xL-bw*0.5-4,tw=ctx.measureText(q.txt).width;
+      ctx.fillStyle=th.bg;ctx.globalAlpha=0.8;
+      ctx.fillRect(al==='left'?lx-2:lx-tw-2,ly-6,tw+4,12);ctx.globalAlpha=1;
+      ctx.fillStyle=q.c;ctx.textAlign=al;ctx.fillText(q.txt,lx,ly);
+    }
+
+    // pin-bar markers
+    if(o.pins&&st.pins){
+      const tri=(x,y,dirUp,c)=>{ctx.fillStyle=c;ctx.beginPath();
+        if(dirUp){ctx.moveTo(x,y);ctx.lineTo(x-5,y+9);ctx.lineTo(x+5,y+9);}
+        else{ctx.moveTo(x,y);ctx.lineTo(x-5,y-9);ctx.lineTo(x+5,y-9);}
+        ctx.closePath();ctx.fill();};
+      if(st.pins.up>=0){const b=bars[A.i0+st.pins.up];tri(xi(A.i0+st.pins.up),yp(b.h)-4,false,th.pinUp);}
+      if(st.pins.down>=0){const b=bars[A.i0+st.pins.down];tri(xi(A.i0+st.pins.down),yp(b.l)+4,true,th.pinDown);}
+    }
+  }
+
+  // last price line
+  const last=bars[bars.length-1],ly=Math.round(yp(last.c))+0.5,lc=last.c>=last.o?th.up:th.down;
+  ctx.strokeStyle=lc;ctx.lineWidth=1;ctx.setLineDash([2,3]);
+  ctx.beginPath();ctx.moveTo(L,ly);ctx.lineTo(R,ly);ctx.stroke();ctx.setLineDash([]);
+
+  // crosshair
+  const hv=st.hover;let hIdx=-1;
+  if(hv&&hv.x>=L&&hv.x<=R&&hv.y>=T&&hv.y<=B){
+    ctx.strokeStyle=th.cross;ctx.lineWidth=1;ctx.setLineDash([4,4]);
+    ctx.beginPath();ctx.moveTo(L,Math.round(hv.y)+0.5);ctx.lineTo(R,Math.round(hv.y)+0.5);
+    ctx.moveTo(Math.round(hv.x)+0.5,T);ctx.lineTo(Math.round(hv.x)+0.5,B);ctx.stroke();ctx.setLineDash([]);
+    hIdx=Math.floor(s0+(hv.x-L)/bw);
+  }
+  ctx.restore(); // end clip
+
+  // ---- axes ----
+  ctx.fillStyle=th.bg;ctx.fillRect(R,0,AXIS_W,H);ctx.fillRect(0,B,W,AXIS_H);
+  ctx.strokeStyle=th.grid;ctx.beginPath();ctx.moveTo(R+0.5,0);ctx.lineTo(R+0.5,B);ctx.moveTo(0,B+0.5);ctx.lineTo(R,B+0.5);ctx.stroke();
+  ctx.fillStyle=th.muted;ctx.textAlign='left';
+  for(const p of gridLabels){const y=yp(p);if(y>T+6&&y<B-6)ctx.fillText(fmtP(p,d),R+6,y);}
+  ctx.textAlign='center';
+  for(const t of timeLabels){if(t.x>20&&t.x<R-20)ctx.fillText(t.txt,t.x,B+AXIS_H/2+1);}
+  const tag=(p,c,txt)=>{const y=yp(p);if(y<T||y>B)return;ctx.fillStyle=c;ctx.fillRect(R,y-8,AXIS_W,16);
+    ctx.fillStyle='#fff';ctx.textAlign='left';ctx.fillText(txt||fmtP(p,d),R+6,y);};
+  for(const a of axisTags)tag(a.p,a.c);
+  tag(last.c,lc);
+  if(hv&&hv.y>=T&&hv.y<=B&&hv.x>=L&&hv.x<=R){
+    const hp=hi-(hv.y-T)/PH*(hi-lo);tag(hp,th.cross);
+    if(hIdx>=0&&hIdx<bars.length){
+      const txt=fmtFull(bars[hIdx].t),tw=ctx.measureText(txt).width+12,x=clamp(xi(hIdx),tw/2,R-tw/2);
+      ctx.fillStyle=th.cross;ctx.fillRect(x-tw/2,B+2,tw,AXIS_H-4);
+      ctx.fillStyle='#fff';ctx.textAlign='center';ctx.fillText(txt,x,B+AXIS_H/2+1);
+    }
+  }
+
+  // ---- legend / tooltip ----
+  ctx.textAlign='left';ctx.font='bold 12px system-ui,-apple-system,"Segoe UI",Roboto,sans-serif';
+  ctx.fillStyle=th.text;ctx.fillText(st.title||'',8,T+10);
+  ctx.font=FONT;
+  if(hIdx>=0&&hIdx<bars.length){
+    const b=bars[hIdx];
+    ctx.fillStyle=th.muted;
+    ctx.fillText('O '+fmtP(b.o,d)+'  H '+fmtP(b.h,d)+'  L '+fmtP(b.l,d)+'  C '+fmtP(b.c,d)+'  V '+Math.round(b.v).toLocaleString('en-US'),8,T+27);
+  }
+  ctx.restore();
+  return layout;
+}
+// </render>
+
+// ---------------------------------------------------------------------------
+// UI: controls, data providers, interaction
+// ---------------------------------------------------------------------------
+if(typeof document!=='undefined'){
+(function(){
+const $=id=>document.getElementById(id);
+const cv=$('cv'),wrap=$('wrap'),ctx=cv.getContext('2d');
+const S={bars:[],tfMs:15*MIN,title:'',view:{start:0,barW:8},anchor:null,prof:null,pins:null,hover:null,
+  layout:null,dec:5,opts:null,anchorLabel:'',loadId:0};
+let W=800,H=500,raf=0,drag=null,theme=null;
+
+function readTheme(){
+  const cs=getComputedStyle(document.documentElement),g=n=>cs.getPropertyValue(n).trim();
+  theme={bg:g('--bg'),grid:g('--grid'),text:g('--text'),muted:g('--muted'),up:g('--up'),down:g('--down'),
+    band:g('--band'),boundary:g('--boundary'),cross:g('--cross'),poc:g('--poc'),valine:g('--valine'),
+    upperBase:'#4682B4',upperVA:'#1E90FF',lowerBase:'#DAA520',lowerVA:'#F0E68C',pinUp:'#d946ef',pinDown:'#22c55e'};
+}
+function opts(){
+  return{anchor:$('anchor').value,offH:+$('offset').value||0,mode:$('mode').value,
+    rows:clamp(Math.round(+$('rows').value)||30,5,200),vaPct:clamp(+$('va').value||70,10,100),
+    widthBars:clamp(Math.round(+$('width').value)||25,5,200),
+    pinRatio:Math.max(0.5,+$('pinRatio').value||2),pinBody:clamp(+$('pinBody').value||35,5,100),
+    showPOC:$('showPOC').checked,showVA:$('showVA').checked,showBounds:$('showBounds').checked,
+    extend:$('extend').checked,hiSrc:$('hiSrc').checked,pins:$('pins').checked,live:$('live').checked};
+}
+
+function draw(){
+  raf=0;if(!theme)readTheme();
+  S.layout=drawChart(ctx,W,H,{bars:S.bars,tfMs:S.tfMs,title:S.title,view:S.view,anchor:S.anchor,prof:S.prof,pins:S.pins,
+    hover:S.hover,dec:S.dec,opts:S.opts||opts(),anchorLabel:S.anchorLabel},theme);
+}
+function schedule(){if(!raf)raf=requestAnimationFrame(draw);}
+
+function resize(){
+  const r=wrap.getBoundingClientRect(),dpr=window.devicePixelRatio||1;
+  W=Math.max(240,Math.floor(r.width));H=Math.max(200,Math.floor(r.height));
+  cv.width=Math.floor(W*dpr);cv.height=Math.floor(H*dpr);cv.style.width=W+'px';cv.style.height=H+'px';
+  ctx.setTransform(dpr,0,0,dpr,0,0);schedule();
+}
+
+function resetView(){
+  const PW=W-AXIS_W,o=S.opts||opts();
+  S.view.barW=clamp(PW/140,3,14);
+  S.view.start=S.bars.length-PW/S.view.barW+o.widthBars+6;
+  schedule();
+}
+function clampStart(s){const pwBars=(W-AXIS_W)/S.view.barW;return clamp(s,-pwBars*0.5,S.bars.length+20);}
+function zoomAt(f,cx){
+  const PW=W-AXIS_W,bw=S.view.barW,nb=clamp(bw*f,1.2,60);
+  const idx=S.view.start+(cx-0)/bw;S.view.barW=nb;S.view.start=clampStart(idx-cx/nb);schedule();
+}
+
+// ---- rebuild indicator from current data + settings ----
+function rebuild(){
+  const o=S.opts=opts();
+  S.anchor=null;S.prof=null;S.pins=null;S.anchorLabel=ANCHOR_LABEL[o.anchor];
+  if(S.bars.length){
+    S.anchor=findAnchor(S.bars,o.anchor,o.offH,S.tfMs);
+    if(S.anchor){
+      S.prof=computeProfiles(S.bars,S.anchor,o.mode,o.rows,o.vaPct);
+      if(o.pins)S.pins=detectPins(S.prof.src,o.pinRatio,o.pinBody);
+    }
+    S.dec=decimalsFor(S.bars[S.bars.length-1].c);
+  }
+  updateInfo();schedule();
+}
+
+function updateInfo(){
+  const el=$('info');el.textContent='';
+  const row=html=>{const d=document.createElement('div');d.innerHTML=html;el.appendChild(d);return d;};
+  const st=document.createElement('div');st.id='status';st.textContent=S.status||'';
+  if(!S.bars.length){el.appendChild(st);return;}
+  const A=S.anchor,P=S.prof,d=S.dec,f=v=>fmtP(v,d),o=S.opts;
+  if(!A){row('<span class="warn">No completed '+S.anchorLabel.replace('Prev ','previous ')+' candle found in the loaded data.</span>');el.appendChild(st);return;}
+  row('<span class="k">'+S.anchorLabel+'</span> <span class="'+(A.bull?'up':'down')+'">'+(A.bull?'Bull':'Bear')+'</span> '
+    +'O '+f(A.o)+' &nbsp;H '+f(A.h)+' &nbsp;L '+f(A.l)+' &nbsp;C '+f(A.c)
+    +' <span class="m">· '+A.count+' bars · from '+fmtFull(A.start)+' UTC</span>');
+  const names=P.mode==='whole'?['Profile']:['Upper zone','Lower zone'];
+  const cols=P.mode==='whole'?['#4682B4']:['#4682B4','#DAA520'];
+  P.zones.forEach((Z,i)=>{
+    row(Z.poc<0?'<span class="sw" style="background:'+cols[i]+'"></span><span class="k">'+names[i]+'</span> <span class="m">no volume inside this zone</span>'
+      :'<span class="sw" style="background:'+cols[i]+'"></span><span class="k">'+names[i]+'</span> '+f(Z.zoneLow)+' – '+f(Z.zoneHigh)
+        +' &nbsp;·&nbsp; POC <b>'+f(Z.pocPrice)+'</b> &nbsp;·&nbsp; VAH '+f(Z.vah)+' &nbsp;·&nbsp; VAL '+f(Z.val));
+  });
+  if(S.pins&&o.pins){
+    const u=S.pins.up>=0,l=S.pins.down>=0;
+    row('<span class="m">Pin bars: upper '+(u?'<b>yes</b> (at the high)':'no')+' · lower '+(l?'<b>yes</b> (at the low)':'no')+'</span>');
+  }
+  if(A.partial)row('<span class="warn">⚠ Loaded data starts after the anchor candle began, so the profile is partial.</span>');
+  if(A.count<3)row('<span class="warn">⚠ Only '+A.count+' chart bar(s) inside the anchor candle. Use a smaller chart timeframe than the anchor for a meaningful histogram.</span>');
+  el.appendChild(st);
+}
+function setStatus(msg){S.status=msg;const s=$('status');if(s)s.textContent=msg;else updateInfo();}
+
+// ---- data providers ----
+async function fetchBinance(sym,iv,startMs){
+  const bases=['https://data-api.binance.vision','https://api.binance.com'];
+  let lastErr;
+  for(const base of bases){
+    try{
+      const out=[];let from=startMs;
+      for(let p=0;p<20;p++){
+        const r=await fetch(base+'/api/v3/klines?symbol='+encodeURIComponent(sym)+'&interval='+iv+'&startTime='+from+'&limit=1000');
+        if(!r.ok){let m='';try{m=(await r.json()).msg;}catch(e){}throw new Error('HTTP '+r.status+(m?' – '+m:''));}
+        const rows=await r.json();
+        if(!Array.isArray(rows)||!rows.length)break;
+        for(const k of rows)out.push({t:k[0],o:+k[1],h:+k[2],l:+k[3],c:+k[4],v:+k[5]});
+        from=rows[rows.length-1][0]+1;
+        if(rows.length<1000)break;
+      }
+      if(!out.length)throw new Error('No data returned (check the symbol)');
+      return out;
+    }catch(e){lastErr=e;}
+  }
+  throw lastErr;
+}
+// How far back to load so the previous anchor candle (and some context) is fully covered.
+function neededStart(tfMs,o){
+  const now=Date.now(),cur=anchorStartOf(now,o.anchor,o.offH),prev=anchorStartOf(cur-1,o.anchor,o.offH);
+  const maxBars=15000;
+  return{start:Math.max(Math.min(prev,now-300*tfMs)-tfMs*2,now-maxBars*tfMs),capped:(now-Math.min(prev,now-300*tfMs))/tfMs>maxBars};
+}
+
+async function load(){
+  const id=++S.loadId,src=$('source').value,o=opts();
+  if(src==='csv'){setStatus('Choose a CSV file.');return;}
+  const tfKey=$('tf').value,tfMs=TF_MS[tfKey];
+  setStatus('Loading…');
+  try{
+    let bars,title;
+    const need=neededStart(tfMs,o);
+    if(src==='binance'){
+      const sym=$('symbol').value.trim().toUpperCase();
+      if(!sym)throw new Error('Enter a symbol, e.g. BTCUSDT');
+      bars=await fetchBinance(sym,tfKey,need.start);title=sym+' · '+tfKey+' · Binance';
+    }else{
+      bars=genDemo(tfMs,Date.now()-need.start+tfMs*20,Date.now(),7);title='DEMO · '+tfKey+' · synthetic data';
+    }
+    if(id!==S.loadId)return;
+    S.bars=bars;S.tfMs=tfMs;S.title=title;
+    setStatus(need.capped?'Loaded the most recent 15,000 bars (the anchor candle may be only partly covered; use a larger chart timeframe).':'');
+    rebuild();resetView();
+  }catch(e){
+    if(id!==S.loadId)return;
+    if(src==='binance'&&!S.bars.length){
+      S.bars=genDemo(tfMs,Date.now()-neededStart(tfMs,o).start+tfMs*20,Date.now(),7);S.tfMs=tfMs;S.title='DEMO · '+tfKey+' · synthetic data';
+      rebuild();resetView();
+      setStatus('Could not load Binance data ('+e.message+'). Showing demo data instead.');
+    }else setStatus('Load failed: '+e.message);
+  }
+}
+
+async function refreshLive(){
+  if(document.hidden||$('source').value!=='binance'||!$('live').checked||!S.bars.length||S.title.indexOf('DEMO')===0)return;
+  const id=S.loadId;
+  try{
+    const sym=$('symbol').value.trim().toUpperCase(),last=S.bars[S.bars.length-1].t;
+    const rows=await fetchBinance(sym,$('tf').value,last);
+    if(id!==S.loadId)return;
+    for(const b of rows){const n=S.bars.length-1;if(b.t===S.bars[n].t)S.bars[n]=b;else if(b.t>S.bars[n].t)S.bars.push(b);}
+    rebuild();
+  }catch(e){/* keep the last good data; try again next tick */}
+}
+setInterval(refreshLive,15000);
+
+// ---- CSV ----
+$('file').addEventListener('change',async e=>{
+  const f=e.target.files&&e.target.files[0];if(!f)return;
+  try{
+    const{bars,tfMs}=parseCSV(await f.text());
+    S.loadId++;S.bars=bars;S.tfMs=tfMs;S.title=f.name+' · '+Math.round(tfMs/MIN)+'m bars';
+    setStatus(bars.length.toLocaleString('en-US')+' bars loaded ('+fmtFull(bars[0].t)+' → '+fmtFull(bars[bars.length-1].t)+'). Timestamps are used as exported (treated as UTC), so offset 0 puts the day boundary at your broker\'s midnight.');
+    rebuild();resetView();
+  }catch(err){setStatus('Could not read the file: '+err.message);}
+});
+
+// ---- controls wiring ----
+function syncSource(){
+  const s=$('source').value;
+  $('symWrap').hidden=s!=='binance';$('fileWrap').hidden=s!=='csv';$('tf').disabled=s==='csv';
+}
+$('source').addEventListener('change',()=>{syncSource();S.bars=[];S.anchor=S.prof=S.pins=null;S.loadId++;if($('source').value==='csv'){rebuild();setStatus('Choose a CSV file.');}else load();});
+$('load').addEventListener('click',load);
+$('symbol').addEventListener('keydown',e=>{if(e.key==='Enter')load();});
+$('tf').addEventListener('change',load);
+['anchor','offset'].forEach(id=>$(id).addEventListener('change',()=>{if($('source').value==='csv')rebuild();else load();}));
+['mode','rows','va','width','pinRatio','pinBody','showPOC','showVA','showBounds','extend','hiSrc','pins','live'].forEach(id=>
+  $(id).addEventListener('change',()=>{rebuild();if(id==='width')resetView();}));
+
+// ---- chart interaction ----
+cv.addEventListener('pointerdown',e=>{cv.setPointerCapture(e.pointerId);drag={x:e.clientX,start:S.view.start};});
+cv.addEventListener('pointermove',e=>{
+  const r=cv.getBoundingClientRect();S.hover={x:e.clientX-r.left,y:e.clientY-r.top};
+  if(drag)S.view.start=clampStart(drag.start-(e.clientX-drag.x)/S.view.barW);
+  schedule();
+});
+const endDrag=e=>{drag=null;if(e.pointerType==='touch'){S.hover=null;schedule();}};
+cv.addEventListener('pointerup',endDrag);cv.addEventListener('pointercancel',endDrag);
+cv.addEventListener('pointerleave',()=>{if(!drag){S.hover=null;schedule();}});
+cv.addEventListener('wheel',e=>{
+  e.preventDefault();const r=cv.getBoundingClientRect();
+  zoomAt(Math.exp(-e.deltaY*0.0015),e.clientX-r.left);
+},{passive:false});
+cv.addEventListener('dblclick',resetView);
+$('zin').addEventListener('click',()=>zoomAt(1.25,(W-AXIS_W)/2));
+$('zout').addEventListener('click',()=>zoomAt(0.8,(W-AXIS_W)/2));
+$('zreset').addEventListener('click',resetView);
+
+if(window.ResizeObserver)new ResizeObserver(resize).observe(wrap);else window.addEventListener('resize',resize);
+if(window.matchMedia)window.matchMedia('(prefers-color-scheme: dark)').addEventListener('change',()=>{readTheme();schedule();});
+
+syncSource();resize();readTheme();S.opts=opts();load();
+window.__vp={S,rebuild,load,resetView,draw}; // handy for debugging in the console
+})();
+}
+</script>
+</body>
+</html>
